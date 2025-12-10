@@ -14,6 +14,15 @@ import argparse
 import os
 from pathlib import Path
 
+# test azurite
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+print('\n \n TEST OUTPUT FOR AZURITE CONNECTION STRING: \n \n')
+print(repr(os.getenv("AZURE_STORAGE_CONNECTION_STRING")))
+
+
 from dotenv import load_dotenv
 from azure.storage.blob import BlobServiceClient
 

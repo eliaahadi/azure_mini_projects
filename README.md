@@ -1,196 +1,251 @@
-# Azure ML Engineer prep – summary
+# Azure ML engineer prep – summary
 
-## 1. Role & goals
+## 1. Role and goals
 
-**Target role:** Machine Learning Engineer / Data Solutions Architect (Azure-focused)
+**Target role:** Machine learning engineer (Azure-focused, data + MLOps)
 
-**My goals with this 2-week prep:**
+**My goals with this prep:**
 
-- Demonstrate hands-on ability to train, deploy, and operate ML models on **Azure Machine Learning**.
-- Show I can build and orchestrate **data pipelines** using **Azure Data Factory / Synapse**.
-- Speak clearly about **MLOps, governance, and risk-oriented use cases** (e.g., delinquency / credit risk) using the **CATER** framework.
+- Show end-to-end ability to **design, train, deploy, and operate** ML models using patterns that map cleanly to **Azure Machine Learning**.
+- Demonstrate comfort with **data pipelines** and **batch / online scoring** in a way that matches a risk / analytics use case (credit / delinquency style).
+- Be able to clearly explain tradeoffs and architecture using my **CATER** framework.
 
 ---
 
 ## 2. Tech stack snapshot
 
-**Languages & libraries**
+**Languages and libs**
 
-- Python (pandas, scikit-learn, numpy, matplotlib)
-- SQL (for analytics / feature engineering)
-- Optional: MLflow / other experiment tools (if used)
+- Python (pandas, numpy, scikit-learn, joblib)
+- MLflow (local, to simulate experiment tracking)
+- FastAPI + uvicorn (local online scoring)
+- pytest (basic tests)
 
-**Azure services used**
+**“Cloud” and infra (local + emulator)**
 
-- **Storage & data**
-  - Azure Blob Storage / Data Lake Storage
-  - Azure SQL DB / Synapse (if used)
+- Azurite (Azure Storage emulator) via Docker
+- Azure Storage SDK (`azure-storage-blob`)
+- Local filesystem “model registry”
+- GitHub Actions (CI skeleton, optional)
 
-- **ML & compute**
-  - Azure Machine Learning workspace
-  - Azure ML compute clusters
-  - Azure ML jobs (training, batch scoring)
-  - Azure ML model registry
-  - Azure ML online and/or batch endpoints
+**Azure mapping**
 
-- **Data pipelines**
-  - Azure Data Factory or Synapse pipelines
-
-- **Ops & tooling**
-  - GitHub + GitHub Actions (or Azure DevOps)
-  - Azure Monitor / logs (conceptually, or hands-on if used)
-  - Power BI or simple reporting tools for model outputs
+- Azurite Blob ⇢ Azure Blob Storage / Data Lake
+- Local MLflow runs ⇢ Azure ML experiments/runs
+- Local registry ⇢ Azure ML model registry
+- FastAPI app ⇢ Azure ML managed online endpoint
+- Batch scripts ⇢ Azure ML batch jobs + ADF/Synapse pipelines
 
 ---
 
-## 3. Project A – Delinquency-style classifier on Azure ML
+## 3. Project A – Online risk-style classifier (Azure-style, local sim)
 
-### 3.1 Problem statement
+### 3.1 Problem
 
 - **Business-style goal:**  
-  (Example) Predict whether a customer is likely to become delinquent / default in the next N days so that risk/collections teams can prioritize outreach.
+  Simulate a **delinquency / risk** classifier: predict whether an entity (e.g., customer / account) is “high risk” (binary classification).
+- **Why:**  
+  Mirrors what this ML engineer role would do for credit union / financial risk models: support proactive outreach, better risk-adjusted decisions.
 
-- **Dataset used:**  
-  - Name / source:
-  - Target variable:
-  - Key features:
+### 3.2 Data
 
-### 3.2 Approach
+- **Source:** sklearn `breast_cancer` dataset, exported to `day1_breast_cancer.csv`.
+- **Target:** `target` (0/1).
+- **Features:** All non-target numeric columns (engineered / scaled in pipeline).
 
-- Data preprocessing:
-  - Handling missing values:
-  - Encoding categorical variables:
-  - Train/test split:
+*(Replace with a real risk dataset later if desired.)*
 
-- Model(s) tried:
-  - Baseline (e.g., logistic regression)
-  - Tree-based (e.g., random forest, XGBoost, etc.)
-  - Final choice & why:
+### 3.3 Training pipeline
 
-- Metrics:
-  - Primary metric(s) (AUC, accuracy, precision/recall, etc.):
-  - Business-relevant interpretation (e.g., “lift in high-risk detection,” etc.):
+- **Script:** `train.py`
+- **Flow:**
+  1. Load data from `day1_breast_cancer.csv` if present, otherwise from sklearn.
+  2. Train/test split (stratified, default 80/20).
+  3. Pipeline: `StandardScaler` → `LogisticRegression(max_iter=1000)`.
+  4. Compute core metrics: accuracy, ROC AUC, classification report.
+  5. Save:
+     - `artifacts/model.joblib`
+     - `artifacts/metrics.json`
+  6. “Register” the model into a **local registry** as a new version:
+     - `local_registry/model_v001/`
+     - `local_registry/model_v002/`  
+       each containing `model.joblib`, `metrics.json`, `metadata.json`.
 
-### 3.3 Azure implementation
+### 3.4 Local model registry (simulated)
 
-- **Data storage:** Blob / Data Lake containers used and folder structure (raw, curated, etc.).
-- **Training:**
-  - Training script: `train.py`
-  - How it’s submitted as an Azure ML job
-  - Metrics and artifacts logged
+- **Directory:** `local_registry/`
+- **Versioning pattern:** `model_vNNN` directories.
+- **Each version contains:**
+  - `model.joblib` – full sklearn Pipeline (scaler + classifier).
+  - `metrics.json` – accuracy, ROC AUC, train/test sizes, random_state.
+  - `metadata.json` – model name, version, registration timestamp.
 
-- **Model registration:**
-  - How model is registered in Azure ML model registry
-  - Versioning approach
+This simulates what Azure ML’s **model registry** gives you (name + version + metadata).
 
-- **Deployment:**
-  - Online endpoint setup (managed endpoint)
-  - Scoring script: `score.py`
-  - Sample request/response format
+### 3.5 Online scoring (local “endpoint”)
 
-- **Client:**
-  - Python client `client.py` to send JSON and get predictions.
+- **Core scorer:** `score.py`
+  - Loads **latest** model from `local_registry/`.
+  - Accepts a list of JSON-like records (`[{feature_name: value, ...}]`).
+  - Returns predictions + probabilities for each record.
 
-### 3.4 Key talking points (for interviews)
+- **FastAPI service:** `app_score_api.py`
+  - Endpoint: `POST /predict`
+  - Request:
 
-- How this maps to a real credit risk / delinquency use case.
-- Tradeoffs made (model complexity vs interpretability, latency vs cost).
-- How monitoring and retraining would work in a production version.
+    ```json
+    {
+      "records": [
+        {
+          "feature_1": 0.1,
+          "feature_2": 2.3
+        }
+      ]
+    }
+    ```
+
+  - Response:
+
+    ```json
+    {
+      "results": [
+        {
+          "input": { "feature_1": 0.1, "feature_2": 2.3 },
+          "prediction": 0,
+          "probability": 0.12
+        }
+      ]
+    }
+    ```
+
+- **Client:** `client.py`
+  - Sends a sample payload to `http://localhost:8000/predict`.
+  - Prints predictions so you can demo the flow end-to-end.
+
+### 3.6 Azure mapping
+
+- `train.py`  
+  ⇢ Azure ML **command job** that logs metrics and saves artifacts.
+
+- `local_registry/model_vNNN/`  
+  ⇢ Azure ML **model registry** (named model + version).
+
+- FastAPI (`app_score_api.py`)  
+  ⇢ Azure ML **managed online endpoint** (with an equivalent `score.py` + environment).
+
+- `client.py`  
+  ⇢ Any downstream **service / application** calling the Azure endpoint.
 
 ---
 
-## 4. Project B – Batch scoring & data pipeline on Azure
+## 4. Project B – Batch scoring and pipeline (Azure-style, local sim)
 
-### 4.1 Problem statement
+### 4.1 Problem
 
 - **Goal:**  
-  (Example) Run nightly batch scoring of accounts to update risk scores and feed dashboards / workflows.
+  Simulate a **nightly batch scoring pipeline** that computes risk scores for a full population and writes them to curated storage for analytics and operations (e.g., daily delinquency / risk lists).
 
-- **Inputs / outputs:**
-  - Input: daily snapshot CSVs in `raw/` storage.
-  - Output: scored files in `curated/` or a database table.
+### 4.2 Batch scoring flow
 
-### 4.2 Pipeline design
+- **Script:** `batch_score.py` (to be implemented / refined)
+- **Intended behavior:**
+  1. Load latest model from `local_registry`.
+  2. Read `raw/new_data_YYYYMMDD.csv`.
+  3. Apply model to each row.
+  4. Write `curated/predictions_YYYYMMDD.csv` with:
+     - Original features
+     - `prediction`
+     - `score` (probability).
 
-- **Data Factory / Synapse pipeline:**
-  - Ingestion / copy activities:
-  - Scoring activity (Python script or Azure ML batch job):
-  - Output write step:
-  - Scheduling (manual / daily schedule):
+- **Optional “pipeline driver”:** `pipeline_run_batch.py`
+  - Accepts `--date YYYY-MM-DD` or similar.
+  - Finds the right input file.
+  - Calls `batch_score.py`.
+  - Logs success/failure.
 
-- **Scoring script:**
-  - File name (e.g., `batch_score.py`)
-  - How it loads the model and data:
-  - Output schema (e.g., original columns + `prediction`, `score`).
+### 4.3 Monitoring and reporting
 
-### 4.3 Monitoring & reporting
+- **Logs:** `logs/batch_runs_log.csv`  
+  Each run appends:
+  - timestamp
+  - input file
+  - row count
+  - min/max score
+  - model version
 
-- Operational logs:
-  - What gets logged each run (row counts, timestamps, min/max scores, etc.).
-  - Where logs are stored (CSV, table, etc.).
+- **Analysis script:** `analyze_predictions.py` (or notebook)
+  - Reads `curated/*predictions*.csv`.
+  - Outputs:
+    - Risk bucket counts (e.g., low/med/high).
+    - Simple trend lines over dates.
 
-- Reporting:
-  - Simple chart / report created:
-    - e.g., distribution of risk scores over time, counts by risk bucket.
+### 4.4 Azure mapping
 
-- Future improvements:
-  - Hooking into Azure Monitor / Log Analytics.
-  - Adding drift detection and automatic alerts.
+- Local CSV folder structure (`raw/`, `curated/`)  
+  ⇢ Azure **Blob Storage / Data Lake** containers and folders.
+
+- `pipeline_run_batch.py` + `batch_score.py`  
+  ⇢ **Azure Data Factory / Synapse** pipeline that:
+    - Copies / stages data.
+    - Triggers an **Azure ML batch job** or Python activity.
+    - Writes predictions into a curated zone (Blob, Lake, or Synapse table).
+
+- `logs/batch_runs_log.csv`  
+  ⇢ Azure **Log Analytics / Azure Monitor**, or a logging table.
+
+- `analyze_predictions.py`  
+  ⇢ **Power BI** dashboards / reports wired to the curated prediction store.
 
 ---
 
 ## 5. Architecture overview
 
-### 5.1 High-level architecture (bullet view)
+### 5.1 High-level architecture (local sim)
 
-- **Sources:** core systems → flat files / APIs
-- **Ingestion:** Azure Data Factory / Synapse pipelines
-- **Storage layers:** raw → staged/curated in Blob/Data Lake/Synapse
-- **ML:**
-  - Training on Azure ML (jobs, registry)
-  - Online endpoint for real-time scoring
-  - Batch jobs for nightly scoring
-- **Consumption:**
-  - Applications / APIs using online endpoint
-  - Dashboards (Power BI) using batch outputs
-- **Monitoring & governance:**
-  - Azure Monitor / logs for operational metrics
-  - RBAC, Key Vault, and basic governance practices
+- **Sources**
+  - Local CSVs (`day1_breast_cancer.csv`, `raw/new_data_*.csv`)
+  - (In real life: core banking systems, CRM, transaction data, etc.)
 
-### 5.2 (Optional) Diagram
+- **Storage**
+  - Local: Azurite (Blob) or filesystem `raw/` and `curated/`
+  - Azure: Blob Storage / Data Lake
 
-> Include or link a simple architecture diagram (Mermaid, PNG, etc.) that shows the full flow.
+- **Training**
+  - Local: `train.py` + MLflow for experiment tracking
+  - Azure: Azure ML jobs (command) with experiment runs
 
----
+- **Model registry**
+  - Local: `local_registry/model_vNNN/`
+  - Azure: Azure ML model registry (name + version)
 
-## 6. Top 10 Azure concepts I’ll reference in interviews
+- **Serving**
+  - Local: FastAPI (`app_score_api.py`) running via uvicorn
+  - Azure: Azure ML managed online endpoints
 
-1. Azure Blob Storage / Data Lake
-2. Azure Machine Learning workspace
-3. Azure ML jobs (training & batch)
-4. Azure ML model registry
-5. Azure ML online endpoints
-6. Azure Data Factory / Synapse pipelines
-7. Azure SQL / Synapse Analytics
-8. Azure Monitor / Log Analytics (for monitoring)
-9. Azure Key Vault (secrets) and RBAC (access control)
-10. CI/CD with GitHub Actions or Azure DevOps for ML code and deployments
+- **Batch**
+  - Local: `batch_score.py` + `pipeline_run_batch.py`
+  - Azure: Data Factory / Synapse pipelines + Azure ML batch endpoints/jobs
 
----
+- **Consumption**
+  - Applications / services calling online endpoint
+  - Dashboards / reports reading curated predictions
 
-## 7. CATER cheat sheet for this work
+- **Monitoring & governance**
+  - Local: simple CSV logs + Python plots
+  - Azure: Azure Monitor, Log Analytics, Key Vault, RBAC
 
-- **C – Context & constraints:**  
-  Business problem (risk/delinquency), success metrics, users, latency & regulatory constraints.
+### 5.2 (Optional) Mermaid diagram
 
-- **A – Architecture & data:**  
-  Azure storage, pipelines, ML workspace, how data flows end-to-end.
+You can embed a Mermaid diagram in `architecture_diagram.md`, for example:
 
-- **T – Tradeoffs & technology choices:**  
-  Online vs batch, model choice, Azure service selection (ADF vs Synapse vs Functions, etc.).
-
-- **E – Execution & MLOps:**  
-  Training scripts, jobs, endpoints, CI/CD, monitoring, retraining.
-
-- **R – Risks, reliability & results:**  
-  Failure modes, governance, security (Key Vault, RBAC), business KPIs and review cadence.
+```mermaid
+flowchart LR
+    A[Source systems / CSVs] --> B[Blob / Data Lake (raw)]
+    B --> C[Data prep / ADF or notebooks]
+    C --> D[Azure ML training job]
+    D --> E[Azure ML model registry]
+    E --> F[Managed online endpoint]
+    E --> G[Batch scoring jobs]
+    G --> H[Blob / Lake (curated predictions)]
+    F --> I[Apps / APIs]
+    H --> J[Power BI / reports]
